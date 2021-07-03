@@ -1,13 +1,18 @@
+import locale
+
 import pandas as pd
-import numpy as np
+
 from datetime import datetime
-from bs4 import BeautifulSoup
 import requests
 from time import sleep
 
-from io import BytesIO
 
 import logging
+
+from main import TriiRequest, TriiHtmlProcessor, BVCRequest
+from reader import Reader
+
+locale.setlocale(locale.LC_ALL, 'es_CO.UTF8')
 
 session = requests.Session()
 
@@ -28,27 +33,26 @@ ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 logger.info('pull xlsx for bvc')
-"""
+
 url_bvc = "https://www.bvc.com.co/pps/tibco/portalbvc/Home/Home?com.tibco.ps.pagesvc.action=updateRenderState&rp.currentDocumentID=1a8f342f_1604706963a_-27d7c0a84ca9&rp.revisionNumber=1&rp.attachmentPropertyName=Attachment&com.tibco.ps.pagesvc.targetPage=1f9a1c33_132040fa022_-78750a0a600b&com.tibco.ps.pagesvc.mode=resource&rp.redirectPage=1f9a1c33_132040fa022_-787e0a0a600b"
 r = requests.get(url_bvc)
-open('dividends.xlsx', 'wb').write(r.content)
+with open('dividends.xlsx', 'wb') as fi: 
+    fi.write(r.content)
 logger.info('xlsx saved')
 
+trii_request = TriiRequest.request()
+nemos_trii = []
+try:
+    nemos_trii = TriiHtmlProcessor.process(trii_request.soup)
+except Exception as e:
+    logger.exception("a")
+
 logger.info('start to process')
-"""
-df = pd.read_excel('dividends.xlsx',  header=7)
-df = df.iloc[1:]
-logger.info('start to cleanup')
-df = df.drop(['FECHA ASAMBLEA', 'DESCRIPCIÓN PAGO PDU', 'MONTO TOTAL ENTREGADO\nEN DIVIDENDOS', 'FECHA INGRESO', "VALOR TOTAL DEL DIVIDENDO"], axis=1)
-df = df.replace('-', np.nan)
-df.dropna(subset = ["VALOR CUOTA"], inplace=True)
-df = df.fillna(method='ffill', axis=0)
-n = datetime.now().replace(minute=0, hour=0,second=0, microsecond=0)
-df = df[df[' FECHA INICIAL'] > n]
-df = df.sort_values(by=[' FECHA INICIAL', 'VALOR CUOTA'])
-df['Valor Accion'] = np.nan
-shares_nemo = list(set(df['NEMOTÉCNICO'].tolist()))
+logger.info('read and cleanup')
+reader = Reader.read_excel("dividends.xlsx")
+shares_nemo = reader.get_share_list()
 retries = {}
+n = datetime.now()
 while shares_nemo:
     share = shares_nemo.pop()
     if share not in retries:
@@ -56,47 +60,45 @@ while shares_nemo:
     retries[share] += 1
     logger.info(f'pull data for {share}')
     value = None
-    data = dict(
-        tipoMercado=1,
-        diaFecha=n.strftime("%d"),
-        mesFecha=n.strftime("%m"),
-        anioFecha=n.strftime("%Y"),
-        nemo=share
-    )
-    logger.info(f'get data: {data}')
     response = None
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.77 Safari/537.36'}
-        response = session.post("https://www.bvc.com.co/pps/tibco/portalbvc/Home/Mercados/enlinea/acciones?com.tibco.ps.pagesvc.action=portletAction&com.tibco.ps.pagesvc.targetSubscription=5d9e2b27_11de9ed172b_-74187f000001&action=buscar", data=data, headers=headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
+        request = BVCRequest.request(nemo=share)
+        response = request.response
+        soup = request.soup
         value = soup.select('#texto_24 > tbody > tr:nth-child(2) > td:nth-child(5)')[0].text
         if value:
             logger.info(f'value found for {share}: {value}')
         else:
             with open(f"acciones-{share}-{datetime.now().isoformat()}.html", "wb") as f:
-                f.write(response.content)
+                f.write(request.response.content)
     except Exception as e:
-        with open(f"acciones-{share}-{datetime.now().isoformat()}.html", "wb") as f:
-                f.write(response.content)
         logger.error(e, exc_info=True)
+
+        try:
+            with open(f"acciones-{share}-{datetime.now().isoformat()}.html", "wb") as f:
+                f.write(response.content)
+        except Exception as e:
+            pass
         if retries[share] <= 3:
             shares_nemo.append(share)
             sleep(10)
     else:
-        sleep(3)
-
-    if value:
-        value = value.replace(",", "")
+        sleep(4)
     logger.info(f'value for {share}: {value}')
-    df.loc[df['NEMOTÉCNICO'] == share, "Valor Accion"] = value
+    reader.set_value_share(share, value)
 
-
+df = reader.excel
 df["Valor Accion"] = pd.to_numeric(df["Valor Accion"], downcast="float")
 df["value"] = df['VALOR CUOTA'] * 100 / df["Valor Accion"]
+df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+df_base = df
+df_base = df_base[df_base['NEMOTÉCNICO'].isin(nemos_trii)]
+df_base.to_excel(f"trii_analisis_{n}_trii.xls")
 df.to_excel(f"analisis_{n}.xls")
 
 df = df.groupby(["NEMOTÉCNICO", "Valor Accion"])["VALOR CUOTA"].agg('sum').to_frame().reset_index()
 logger.info(df.head())
 df["value"] = df['VALOR CUOTA'] * 100 / df["Valor Accion"]
-
+df_base = df[df['NEMOTÉCNICO'].isin(nemos_trii)]
+df_base.to_excel(f"trii_analisis_2-{n}.xls")
 df.to_excel(f"analisis_2-{n}.xls")
