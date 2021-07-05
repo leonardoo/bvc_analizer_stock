@@ -6,8 +6,8 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 
 
-import logging
-logger = logging.getLogger(__file__)
+from logger import logger
+
 
 
 class RequestPage(ABC):

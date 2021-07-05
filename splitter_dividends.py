@@ -1,36 +1,17 @@
 import locale
 
-import pandas as pd
-
 from datetime import datetime
 import requests
 from time import sleep
 
-
-import logging
-
 from main import TriiRequest, TriiHtmlProcessor, BVCRequest
-from reader import Reader
+from reader import Reader, Report1, Report2, ReportApplyTrii
+
+from logger import logger
 
 locale.setlocale(locale.LC_ALL, 'es_CO.UTF8')
 
 session = requests.Session()
-
-logger = logging.getLogger(__file__)
-logger.setLevel(logging.DEBUG)
-
-# create console handler and set level to debug
-ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
-
-# create formatter
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-# add formatter to ch
-ch.setFormatter(formatter)
-
-# add ch to logger
-logger.addHandler(ch)
 
 logger.info('pull xlsx for bvc')
 
@@ -87,18 +68,7 @@ while shares_nemo:
     logger.info(f'value for {share}: {value}')
     reader.set_value_share(share, value)
 
-df = reader.excel
-df["Valor Accion"] = pd.to_numeric(df["Valor Accion"], downcast="float")
-df["value"] = df['VALOR CUOTA'] * 100 / df["Valor Accion"]
-df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
-df_base = df
-df_base = df_base[df_base['NEMOTÉCNICO'].isin(nemos_trii)]
-df_base.to_excel(f"trii_analisis_{n}_trii.xls")
-df.to_excel(f"analisis_{n}.xls")
-
-df = df.groupby(["NEMOTÉCNICO", "Valor Accion"])["VALOR CUOTA"].agg('sum').to_frame().reset_index()
-logger.info(df.head())
-df["value"] = df['VALOR CUOTA'] * 100 / df["Valor Accion"]
-df_base = df[df['NEMOTÉCNICO'].isin(nemos_trii)]
-df_base.to_excel(f"trii_analisis_2-{n}.xls")
-df.to_excel(f"analisis_2-{n}.xls")
+an = Report1(reader.excel, f"analisis.xls").apply_operations().generate_excel()
+an_trii = ReportApplyTrii(an.df, f"trii_analisis.xls").apply_operations(nemos_trii).generate_excel()
+an2 = Report2(an.df, f"analisis_2.xls").apply_operations().generate_excel()
+an2_trii = ReportApplyTrii(an2.df, f"trii_analisis_2.xls").apply_operations(nemos_trii).generate_excel()
