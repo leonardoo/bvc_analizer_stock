@@ -69,6 +69,7 @@ while shares_nemo:
     reader.set_value_share(share, value)
 
 an = Report1(reader.excel, f"analisis.xls").apply_operations().generate_excel()
+
 an_trii = ReportApplyTrii(an.df, f"trii_analisis.xls").apply_operations(nemos_trii).generate_excel()
 an2 = Report2(an.df, f"analisis_2.xls").apply_operations().generate_excel()
 an2_trii = ReportApplyTrii(an2.df, f"trii_analisis_2.xls").apply_operations(nemos_trii).generate_excel()

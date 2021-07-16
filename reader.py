@@ -7,20 +7,45 @@ import numpy as np
 import pandas as pd
 
 
-class Reader:
-
+class ReaderBase:
     def __init__(self, name):
         self.name = name
+        self.header = 0
 
     def _read_excel(self):
-        self.excel = pd.read_excel('dividends.xlsx', engine='openpyxl', header=7)
+        self.excel = pd.read_excel(self.name, engine='openpyxl', header=self.header)
+        return self
+
+    def _clean_excel_data(self):
+        return self
+
+    @classmethod
+    def read_excel(cls, name):
+        return cls(name)._read_excel()._clean_excel_data()
+
+
+class ReaderSender(ReaderBase):
+    def _read_excel(self):
+        super()._read_excel()
+        self.excel.dropna(subset=["Valor Accion"], inplace=True)
+        return self
+
+
+class Reader(ReaderBase):
+
+    def __init__(self, name):
+        super().__init__(name)
+        self.header = 7
+
+    def _read_excel(self):
+        super()._read_excel()
         self.excel = self.excel.iloc[1:]
         return self
 
     def _clean_excel_data(self):
         self.excel = self.excel.drop(
             ['FECHA ASAMBLEA', 'DESCRIPCIÓN PAGO PDU', 'MONTO TOTAL ENTREGADO\nEN DIVIDENDOS',
-             'FECHA INGRESO', "VALOR TOTAL DEL DIVIDENDO"],
+             'FECHA INGRESO'],
             axis=1
         )
 
@@ -35,10 +60,6 @@ class Reader:
         self.excel["VALOR CUOTA"] = self.excel["VALOR CUOTA"].astype(str).str.replace(r'(\$|\')', '').astype(float)
         self.excel['Valor Accion'] = np.nan
         return self
-
-    @staticmethod
-    def read_excel(name):
-        return Reader(name)._read_excel()._clean_excel_data()
 
     def get_share_list(self):
         return list(set(self.excel['NEMOTÉCNICO'].tolist()))
